@@ -95,6 +95,3 @@ Listing applies to the bucket, while reading and writing apply to the objects, s
 - [ ] Terraform against LocalStack
 - [ ] CI pipeline that deploys to LocalStack
 
-## 🔒 Security
-
-Never commit `.env` or `deployer.env`. Both are listed in `.gitignore`.
