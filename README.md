@@ -1,4 +1,3 @@
-cat > README.md << 'EOF'
 # ☁️ LocalStack Lab: S3 Static Website + IAM
 
 ![LocalStack](https://img.shields.io/badge/LocalStack-AWS%20emulator-4D29B4)
