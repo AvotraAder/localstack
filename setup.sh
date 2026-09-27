@@ -1,8 +1,9 @@
+cat > setup.sh << 'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
 
-BUCKET="frontend"
+BUCKET="front"
 USER_NAME="frontend-deployer"
 POLICY_NAME="FrontendDeploy"
 POLICY_ARN="arn:aws:iam::000000000000:policy/${POLICY_NAME}"
@@ -13,6 +14,16 @@ awslocal s3 mb "s3://${BUCKET}"
 echo "==> Uploading website"
 awslocal s3 sync ./frontend "s3://${BUCKET}"
 awslocal s3 website "s3://${BUCKET}/" --index-document index.html
+
+echo "==> Enabling versioning"
+awslocal s3api put-bucket-versioning \
+  --bucket "$BUCKET" \
+  --versioning-configuration Status=Enabled
+
+echo "==> Applying lifecycle rules"
+awslocal s3api put-bucket-lifecycle-configuration \
+  --bucket "$BUCKET" \
+  --lifecycle-configuration file://lifecycle.json
 
 echo "==> Creating IAM user"
 awslocal iam create-user --user-name "$USER_NAME" > /dev/null
@@ -39,3 +50,7 @@ chmod 600 deployer.env
 
 echo "Done. Website: http://${BUCKET}.s3-website.localhost.localstack.cloud:4566/"
 echo "Deployer credentials saved in deployer.env"
+EOF
+
+chmod +x setup.sh
+cat setup.sh
