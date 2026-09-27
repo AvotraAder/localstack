@@ -1,0 +1,20 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-old-versions",
+      "Status": "Enabled",
+      "Filter": {},
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 30
+      }
+    },
+    {
+      "ID": "expire-tmp-folder",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "tmp/" },
+      "Expiration": {
+        "Days": 7
+      }
+    }
+  ]
+}
