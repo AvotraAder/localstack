@@ -1,18 +1,20 @@
-# ☁️ LocalStack Lab: S3 Static Website + IAM
+# ☁️ LocalStack Lab: AWS Services Playground
 
 ![LocalStack](https://img.shields.io/badge/LocalStack-AWS%20emulator-4D29B4)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
-![AWS](https://img.shields.io/badge/AWS-S3%20%7C%20IAM-FF9900?logo=amazonaws&logoColor=white)
+![AWS](https://img.shields.io/badge/AWS-S3%20%7C%20IAM%20%7C%20Lambda%20%7C%20EC2-FF9900?logo=amazonaws&logoColor=white)
 ![Status](https://img.shields.io/badge/status-learning%20project-blue)
 
-Hands-on cloud lab that runs AWS services **locally** with LocalStack, so you can learn S3 and IAM without a real AWS account or any cost.
+Hands-on cloud lab that runs AWS services **locally** with LocalStack, so you can learn S3, IAM, Lambda and EC2 without a real AWS account or any cost.
 
 ## ✨ What it does
 
 - Hosts a static website from an **S3 bucket**
 - Creates an **IAM user** with a **least-privilege policy**
 - Keeps a full **version history** of files, with automatic cleanup via **lifecycle rules**
-- Rebuilds everything with **one script** (`setup.sh`)
+- Runs real serverless code with **Lambda**, executed in an actual Docker container
+- Simulates a **VPC, security group and EC2 instance** lifecycle
+- Rebuilds the S3/IAM part with **one script** (`setup.sh`)
 
 ## 🏗️ Architecture
 
@@ -22,14 +24,19 @@ flowchart LR
     subgraph LS[LocalStack container]
         S3[(S3 bucket: front)]
         IAM[IAM user + policy]
+        Lambda[Lambda: hello-function]
+        EC2[EC2: VPC + SG + instance]
     end
     IAM -. allowed actions .-> S3
     Browser[Browser / curl] -->|website endpoint| S3
+    Dev -->|invoke| Lambda
+    Lambda -->|runs in| DockerRuntime[Docker runtime container]
 ```
 
 ## 🧰 Requirements
 
 - Docker and Docker Compose
+- The Docker CLI binary must be reachable **inside** the LocalStack container (required for Lambda to spawn runtime containers) — see `docker-compose.yml`
 - A free [LocalStack](https://www.localstack.cloud) account and auth token
 - `awslocal`: `pip install awscli-local`
 
@@ -46,7 +53,7 @@ echo 'LOCALSTACK_AUTH_TOKEN=your-token-here' > .env
 # 3. Start LocalStack
 docker compose up -d
 
-# 4. Build the lab
+# 4. Build the S3 + IAM part
 ./setup.sh
 
 # 5. Open the site
@@ -100,30 +107,76 @@ Defined in `lifecycle.json` and applied with `put-bucket-lifecycle-configuration
 
 This keeps version history from growing forever without deleting the current live files.
 
-## 📁 Project structure
-.
-├── docker-compose.yml # LocalStack container (token read from .env)
-├── deploy-policy.json # IAM policy for the deployer
-├── lifecycle.json # S3 lifecycle rules
-├── setup.sh # bucket + site + user + policy + keys
-└── frontend/ # website files
+## ⚡ Lambda
 
+A Python function deployed and invoked locally:
+
+```bash
+awslocal lambda create-function \
+  --function-name hello-function \
+  --runtime python3.12 \
+  --handler handler.handler \
+  --role arn:aws:iam::000000000000:role/lambda-exec-role \
+  --zip-file fileb://lambda/function.zip
+
+awslocal lambda invoke \
+  --function-name hello-function \
+  --payload '{"name": "Avotra"}' \
+  --cli-binary-format raw-in-base64-out \
+  response.json
+```
+
+Unlike EC2 (below), Lambda actually **executes** the code — LocalStack spins up a real Docker container per invocation. This requires the `docker` binary to be available inside the LocalStack container (mounted in `docker-compose.yml`); without it, functions stay stuck in `Pending` forever.
+
+## 🖥️ EC2
+
+Simulates the EC2 API: VPC, security groups, instances, tags, and the stop/start/terminate lifecycle.
+
+```bash
+awslocal ec2 create-security-group --group-name web-sg --description "Allow SSH and HTTP" --vpc-id <VPC_ID>
+awslocal ec2 authorize-security-group-ingress --group-id <SG_ID> --protocol tcp --port 22 --cidr 0.0.0.0/0
+awslocal ec2 run-instances --image-id <AMI_ID> --instance-type t2.micro --security-group-ids <SG_ID> --count 1
+awslocal ec2 create-tags --resources <INSTANCE_ID> --tags Key=Name,Value=web-server-1
+```
+
+**Important limitation:** in LocalStack Community, EC2 is an **API mock only** — instances get a real ID, state and tags, but no actual OS boots. There is nothing to SSH into. This is different from Lambda, where code genuinely runs. Full instance emulation is a LocalStack Pro feature.
+
+## 📁 Project structure
+
+```
+.
+├── docker-compose.yml    # LocalStack container (token read from .env, docker binary mounted)
+├── deploy-policy.json    # IAM policy for the deployer
+├── lifecycle.json        # S3 lifecycle rules
+├── lambda-trust-policy.json  # trust policy for the Lambda execution role
+├── lambda/                # Lambda function source + zip
+├── setup.sh               # bucket + site + user + policy + keys
+└── frontend/               # website files
+```
 
 ## 🧠 What I learned
 
 - Creating S3 buckets, syncing files, and enabling website hosting
 - S3 versioning: how overwrites and restores actually work under the hood
 - Lifecycle rules to auto-expire old versions and temp files
-- IAM users, policies, ARNs and access keys
-- Identity-based vs resource-based policies
+- IAM users, policies, ARNs, roles and access keys
+- Identity-based vs resource-based policies, trust policies
+- Deploying and invoking Lambda functions, and why they need Docker-in-Docker access
+- EC2 core objects (VPC, security groups, instances, tags) and their lifecycle
+- The difference between services LocalStack truly executes (S3, Lambda) and services it only mocks at the API level (EC2 in Community edition)
 - Keeping secrets out of Git (`.env`, `.gitignore`)
 - Automating a manual setup with a Bash script
 
+## ⚠️ Known issues
+
+- `ENFORCE_IAM=1` is set and reaches the container, but the deployer was **not denied** forbidden actions in my tests (e.g. creating another bucket). Same pattern observed with S3 object ACLs (`private` didn't actually block access). Policy/ACL enforcement in LocalStack Community appears limited; under investigation.
+- EC2 instances are API-only in Community edition: no real compute, no SSH access.
+
 ## 🛣️ Next steps
 
-- [ ] Get IAM enforcement working and show a real `AccessDenied`
+- [ ] Get IAM/ACL enforcement working and show a real `AccessDenied`
 - [ ] Presigned URLs for temporary private access
-- [ ] Lambda functions
 - [ ] SQS, SNS and DynamoDB
 - [ ] Terraform against LocalStack
 - [ ] CI pipeline that deploys to LocalStack
+
